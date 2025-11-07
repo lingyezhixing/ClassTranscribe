@@ -1,0 +1,29 @@
+# ClassTranscribe 配置文件
+
+# 扫描与VAD配置
+scan_interval_minutes: 5 # 定期扫描新文件的间隔（分钟）
+path_pairs: # 扫描路径与转移路径的配对
+  - scan_path: "/data/recordings"
+    transfer_path: "/data/processed"
+  # - scan_path: "/data/other_recordings"
+  #   transfer_path: "/data/other_processed"
+vad_norm_processes: 8 # VAD后音频标准化所用的并发进程数
+
+# 远程 FireRedASR API 配置
+remote_asr_api_url: "http://192.168.1.100:8000/transcribe/FireRedASR" # 你的 FireRedASR API 地址
+asr_api_params:
+  # asr_type: "llm" # aed 或 llm
+  # asr_device: "cuda:0"
+  # llm_device: "cuda:1"
+  # llm_dtype: "bf16"
+  # use_flash_attn: false
+  # batch_size: 4
+  beam_size: 3
+  # aed_length_penalty: 0.6
+  # repetition_penalty: 3.0
+
+# OpenAI API (或兼容API) 配置
+openai_api_base: "https://api.openai.com/v1" # 例如 "http://127.0.0.1:8080/v1"
+openai_api_key: "sk-your-key-here" # 你的API Key
+llm_model_name: "gpt-4o" # 用于合并与润色的模型名称
+llm_concurrency: 3 # 同时调用LLM API的最大并发数

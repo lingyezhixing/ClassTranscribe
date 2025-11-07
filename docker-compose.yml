@@ -1,0 +1,19 @@
+services:
+  classtranscribe:
+    # 构建镜像
+    build: .
+    # 镜像名称和标签
+    image: lingyezhixing/classtranscribe
+    # 容器名称
+    container_name: ClassTranscribe
+    # 端口映射: 将主机的33013端口映射到容器的33013端口
+    ports:
+      - "33013:33013"
+    # 数据卷映射:
+    # - 将主机的 ./data 目录映射到容器的 /data 目录，用于存放音频文件
+    # - 将主机的配置文件映射到容器内，方便修改配置而无需重建镜像
+    volumes:
+      - ./data:/data
+      - ./app/config.yaml:/app/config.yaml
+    # 容器崩溃后自动重启
+    restart: always

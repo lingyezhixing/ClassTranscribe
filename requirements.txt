@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+jinja2
+aiohttp
+pyyaml
+apscheduler
+tqdm
+pydantic
+# VAD 依赖
+silero-vad-iterator
+torch
+torchaudio
+pydub
+# LLM 合并依赖
+openai>=1.0.0

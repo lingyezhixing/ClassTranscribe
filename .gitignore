@@ -1,0 +1,92 @@
+# 忽略日志文件
+*.log
+
+# 忽略可执行文件
+*.exe
+
+# 忽略动态链接库
+*.dll
+
+# 忽略构建目录
+/build/
+
+# 忽略日志目录
+/logs/
+
+# 忽略整个pretrained_models文件夹
+/pretrained_models/
+
+# 忽略CMake相关文件
+CMakeFiles/
+CMakeCache.txt
+CMakeOutput.log
+CMakeFiles/
+*.cmake
+
+# 忽略编译器生成的文件
+*.o
+*.obj
+*.so
+*.dylib
+
+# 忽略IDE相关文件
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 忽略系统生成文件
+Thumbs.db
+.DS_Store
+
+# 忽略Python缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+
+# 忽略虚拟环境
+venv/
+env/
+.venv/
+
+# 忽略Node.js相关文件
+node_modules/
+
+# 忽略其他临时文件
+*.tmp
+*.temp
+
+# 忽略配置文件中的敏感信息
+.env
+.config
+
+# 忽略VS Code工作区文件
+ClassTranscribe.code-workspace
+
+# 忽略Claude Code相关文件
+.claude/
+
+# 忽略所有包含test的文件和文件夹
+*test*
+**/*test*/
+**/test_*
+
+# 忽略指定的文档和文件夹
+Prompt.txt
+audio_split_output_vad/
+gaowanying.wav
+
+# 忽略所有数据库文件
+*.db
+*.sqlite
+*.sqlite3
+**/*.db
+**/*.sqlite
+**/*.sqlite3
+
+# 忽略AI上下文生成器
+generate_ai_context.py
+ai_context.md
