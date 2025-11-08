@@ -1,11 +1,10 @@
 import torch
 import os
 import json
-import torchaudio
 import subprocess
 import tempfile
 from pydub import AudioSegment
-from silero_vad import load_silero_vad, get_speech_timestamps
+from silero_vad import read_audio, get_speech_timestamps
 from multiprocessing import Pool
 from tqdm import tqdm
 
@@ -77,18 +76,8 @@ class AudioSplitter:
             if 'temp_filepath' in locals() and os.path.exists(temp_filepath): os.remove(temp_filepath)
             return (filepath, False, str(e))
 
-    @staticmethod
-    def _read_audio(path: str, sampling_rate: int = 16000):
-        if not os.path.exists(path): raise FileNotFoundError(f"音频文件不存在: {path}")
-        wav, sr = torchaudio.load(path)
-        if wav.size(0) > 1: wav = wav.mean(dim=0, keepdim=True)
-        if sr != sampling_rate:
-            transform = torchaudio.transforms.Resample(orig_freq=sr, new_freq=sampling_rate)
-            wav = transform(wav)
-        return wav.squeeze(0)
-
     def _get_full_timeline(self, audio_path: str) -> list:
-        wav = self._read_audio(audio_path)
+        wav = read_audio(audio_path)
         speech_timestamps = get_speech_timestamps(wav, self.vad_model, sampling_rate=16000, return_seconds=True)
         audio_duration_seconds = len(wav) / 16000
         timeline = []

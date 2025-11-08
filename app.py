@@ -5,18 +5,16 @@ import json
 import logging
 import os
 import re
+import httpx
+import yaml
 import shutil
 import difflib
 from contextlib import asynccontextmanager
 from typing import List, Dict, Any
-
-import httpx
-import yaml
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from openai import AsyncOpenAI
-
 from AudioSplitter import AudioSplitter
 
 # --- 日志配置 ---

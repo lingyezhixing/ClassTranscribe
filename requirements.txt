@@ -1,1 +1,11 @@
 fastapi
+uvicorn[standard]
+torch == 2.7.0
+torchaudio == 2.7.0
+soundfile
+PyYAML
+pydub
+silero_vad
+tqdm
+openai
+httpx
