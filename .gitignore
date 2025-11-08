@@ -78,6 +78,7 @@ ClassTranscribe.code-workspace
 Prompt.txt
 audio_split_output_vad/
 gaowanying.wav
+data/
 
 # 忽略所有数据库文件
 *.db

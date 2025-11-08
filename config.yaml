@@ -1,0 +1,32 @@
+# ClassTranscribe 配置文件
+
+# 扫描与VAD配置
+scan_interval_minutes: 0.1
+path_pairs: # 扫描路径与转移路径的配对
+  - scan_path: "E:/Programming/pycodes/Projects/Dev_Projects/ClassTranscribe/data/recordings"
+    transfer_path: "E:/Programming/pycodes/Projects/Dev_Projects/ClassTranscribe/data/processed"
+vad_norm_processes: 4
+
+# 远程 FireRedASR API 配置
+remote_asr_api_url: "http://127.0.0.1:8000/transcribe/FireRedASR"
+asr_api_params:
+  asr_type: "aed" # aed 或 llm
+  # asr_device: "cuda:0"
+  # llm_device: "cuda:1"
+  # llm_dtype: "bf16"
+  # use_flash_attn: false
+  # batch_size: 4
+  # beam_size: 3
+  # aed_length_penalty: 0.6
+  # repetition_penalty: 3.0
+
+# OpenAI API (或兼容API) 配置
+openai_api_base: "http://127.0.0.1:8080/v1"
+openai_api_key: "lingyezhixing"
+llm_model_name: "Qwen3-14B-AWQ"
+llm_concurrency: 32
+
+# --- 流程控制 ---
+# 设置为 false, ASR任务会全部完成后再开始分别进行LLM合并。
+# 设置为 true, 则会在每个ASR任务完成后立即发送给LLM进行合并。
+allow_concurrent_asr_llm: false

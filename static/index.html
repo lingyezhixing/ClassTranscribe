@@ -1,0 +1,38 @@
+<!-- ClassTranscribe/static/index.html -->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ClassTranscribe 控制面板</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>ClassTranscribe 控制面板</h1>
+            <div class="controls">
+                <button id="transcribe-btn">扫描并转录</button>
+                <span class="status" id="scan-status">扫描状态: 停止</span>
+            </div>
+        </header>
+
+        <main class="queues">
+            <div class="queue-column">
+                <h2>VAD 任务队列 <span id="vad-count"></span></h2>
+                <ul id="vad-list" class="task-list"></ul>
+            </div>
+            <div class="queue-column">
+                <h2>ASR 任务队列 <span id="asr-count"></span></h2>
+                <ul id="asr-list" class="task-list"></ul>
+            </div>
+            <div class="queue-column">
+                <h2>LLM 合并任务队列 <span id="llm-count"></span></h2>
+                <ul id="llm-list" class="task-list"></ul>
+            </div>
+        </main>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
