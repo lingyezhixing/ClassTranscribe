@@ -17,6 +17,44 @@ from fastapi.responses import FileResponse
 from openai import AsyncOpenAI
 from AudioSplitter import AudioSplitter
 
+# --- 新的两阶段提示词 ---
+PROMPT_STAGE_1 = """你是一位顶级的速记员和文本编辑。你将收到一段由语音识别（ASR）直接生成的原始文本，其中包含了许多因强制切分导致的不完整的短句，每行一个。
+
+你的任务是：
+1. **智能合并**：将这些零碎的短语无缝地拼接成通顺、完整的句子。
+2. **添加标点**：为全文添加精确的标点符号，包括逗号、句号、问号等，使文本更具可读性。
+3. **修正错误**：根据上下文，修正ASR可能产生的明显识别错误（如同音字、错别字）。
+4. **合理分段**：在适当的地方进行换行，形成逻辑清晰的段落。
+
+**要求**：
+- 直接返回处理后的文本。
+- **不要**包含任何解释、标题或“处理后文本：”这样的前缀。
+
+原始文本碎片如下：
+---
+{chunk_text}
+---
+
+处理后的文本："""
+
+PROMPT_STAGE_2 = """你是一位语言大师，擅长优化文本的衔接与流畅度。我遇到了文本的中间存在一个因技术原因造成的、不自然的断裂或转折点的问题，我已经从断裂点处分割了前后段落，请你进行处理。
+
+你的**唯一任务**是：
+- **重写整个文本段**，使其成为一个单一、连贯、流畅的整体。
+- 确保上下文逻辑通顺，完美地弥合中间的断裂感。
+- 保留原始的核心信息，但要让过渡变得无法察觉。
+
+**要求**：
+- 直接返回重写后的、无缝衔接的完整文本段。
+- **不要**添加任何与原文无关的评论或解释。
+
+断点前的文本：{prev_junction_text}
+
+断点后的文本：{next_junction_text}
+
+重写后的完整文本："""
+
+
 # --- 日志配置 ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -48,21 +86,6 @@ def load_config(path: str = "config.yaml") -> Dict:
 
 async def run_in_threadpool(func, *args, **kwargs):
     return await asyncio.to_thread(func, *args, **kwargs)
-
-def merge_llm_results(results: List[str]) -> str:
-    if not results: return ""
-    merged_text = results[0]
-    for i in range(1, len(results)):
-        next_text = results[i]
-        len1, len2 = len(merged_text), len(next_text)
-        overlap_len = min(len1, len2, 200) 
-        seq_matcher = difflib.SequenceMatcher(None, merged_text[-overlap_len:], next_text[:overlap_len])
-        match = seq_matcher.find_longest_match(0, overlap_len, 0, overlap_len)
-        if match.size > 5:
-            merged_text += next_text[match.b + match.size:]
-        else:
-             merged_text += "\n" + next_text
-    return merged_text
 
 # --- 后台任务 ---
 
@@ -139,7 +162,7 @@ async def vad_worker():
                     await run_in_threadpool(os.rename, old_file_path, new_file_path)
                     logging.info(f"VAD Worker: 为第一份文件添加序号: {existing_filename} -> {new_indexed_filename}")
 
-                    # <--- 修复点: 同步重命名对应的文件夹 ---
+                    # 同步重命名对应的文件夹
                     old_dir_path = os.path.join(transfer_path, existing_base_name)
                     new_indexed_dir_name = f"{base_name_A}-1"
                     new_dir_path = os.path.join(transfer_path, new_indexed_dir_name)
@@ -147,7 +170,6 @@ async def vad_worker():
                     if await run_in_threadpool(os.path.isdir, old_dir_path):
                         await run_in_threadpool(os.rename, old_dir_path, new_dir_path)
                         logging.info(f"VAD Worker: 同步重命名文件夹: {existing_base_name} -> {new_indexed_dir_name}")
-                    # --- 修复点结束 ---
                 
                 new_filename = f"{base_name_A}-2{ext}"
 
@@ -267,52 +289,116 @@ async def llm_worker():
     cfg = app_state["config"]
     client = app_state["openai_client"]
     semaphore = asyncio.Semaphore(cfg["llm_concurrency"])
-    async def process_chunk(chunk_text: str) -> str:
+    PUNCTUATION_SEARCH = re.compile(r'[.!?。！？\n]')
+
+    async def process_llm_request(prompt: str, model: str, temperature: float) -> str:
         async with semaphore:
             try:
-                prompt = f"""你是一个专业的速记员和文本后期处理专家。请将以下由语音识别（ASR）生成的原始文本进行处理。你的任务是：
-1.  修正明显的识别错误。
-2.  添加恰当的标点符号，包括逗号、句号、问号等。
-3.  根据上下文和语义，将文本进行合理的分段，用换行符分隔。
-请直接返回处理后的文本，不要包含任何额外的解释或标题。
-
-原始文本如下：
-"{chunk_text}"
-"""
-                completion = await client.chat.completions.create(model=cfg["llm_model_name"], messages=[{"role": "user", "content": prompt}], temperature=0.3)
+                completion = await client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=temperature
+                )
                 return completion.choices[0].message.content.strip()
             except Exception as e:
                 logging.error(f"LLM Worker: 调用API时出错: {e}")
                 return f"[LLM处理失败: {e}]"
+
     while True:
         task_id = await app_state["llm_queue"].get()
         logging.info(f"LLM Worker: 开始处理任务 {task_id}")
         app_state["llm_tasks"][task_id] = "进行中"
         try:
-            with open(os.path.join(task_id, "_asr_complete.json"), 'r', encoding='utf-8') as f: transcripts = [item['text'] for item in json.load(f)]
-            chunks, current_chunk, current_len = [], [], 0
-            for i, text in enumerate(transcripts):
-                current_chunk.append(text)
+            asr_complete_path = os.path.join(task_id, "_asr_complete.json")
+            with open(asr_complete_path, 'r', encoding='utf-8') as f:
+                transcripts = [item['text'] for item in json.load(f)]
+
+            # --- 阶段一: 将ASR碎片整合为连贯的文本块 ---
+            logging.info(f"LLM Worker (任务 {task_id}): 开始阶段一处理...")
+            chunks, current_chunk_lines, current_len = [], [], 0
+            for text in transcripts:
+                current_chunk_lines.append(text)
                 current_len += len(text)
-                if current_len >= 500 and i < len(transcripts) - 1:
-                    chunks.append(" ".join(current_chunk))
-                    current_chunk = [current_chunk[-1]]
-                    current_len = len(current_chunk[0])
-            if current_chunk: chunks.append(" ".join(current_chunk))
-            llm_tasks = [process_chunk(chunk) for chunk in chunks]
-            llm_results = await asyncio.gather(*llm_tasks)
-            final_text = merge_llm_results(llm_results)
+                if current_len >= 500:
+                    chunks.append("\n".join(current_chunk_lines))
+                    current_chunk_lines, current_len = [], 0
+            if current_chunk_lines:
+                chunks.append("\n".join(current_chunk_lines))
+
+            stage1_prompts = [PROMPT_STAGE_1.format(chunk_text=chunk) for chunk in chunks]
+            stage1_tasks = [process_llm_request(p, cfg["llm_model_name"], 0.3) for p in stage1_prompts]
+            stage1_results = await asyncio.gather(*stage1_tasks)
+            logging.info(f"LLM Worker (任务 {task_id}): 阶段一完成，生成 {len(stage1_results)} 个文本块。")
+
+            # --- 阶段二: 平滑处理文本块之间的连接处 ---
+            if not stage1_results:
+                final_text = ""
+            elif len(stage1_results) == 1:
+                final_text = stage1_results[0]
+            else:
+                logging.info(f"LLM Worker (任务 {task_id}): 开始阶段二处理，平滑 {len(stage1_results) - 1} 个连接点...")
+                text_blocks = list(stage1_results)
+                
+                for i in range(len(text_blocks) - 1):
+                    prev_block = text_blocks[i]
+                    next_block = text_blocks[i+1]
+
+                    # 从前一个块的末尾向前取约250个字符作为上下文
+                    slice_len_prev = min(len(prev_block), 250)
+                    search_area_prev = prev_block[-slice_len_prev:]
+                    matches_prev = list(PUNCTUATION_SEARCH.finditer(search_area_prev))
+                    # 在上下文中寻找第一个标点作为切分点，以保证句子完整性
+                    if matches_prev:
+                        # 修正点: 之前是 matches_prev[-1]，现在改为 matches_prev[0]，以实现“向前找第一个标点”
+                        split_offset = matches_prev[0].end()
+                        split_point_prev = len(prev_block) - slice_len_prev + split_offset
+                    else:
+                        split_point_prev = len(prev_block) - slice_len_prev
+
+                    # 从后一个块的开头向后取约250个字符作为上下文
+                    slice_len_next = min(len(next_block), 250)
+                    search_area_next = next_block[:slice_len_next]
+                    matches_next = list(PUNCTUATION_SEARCH.finditer(search_area_next))
+                    # 在上下文中寻找最后一个标点作为切分点 (此逻辑是正确的)
+                    if matches_next:
+                        split_point_next = matches_next[-1].end()
+                    else:
+                        split_point_next = slice_len_next
+                    
+                    prev_junction_text = prev_block[split_point_prev:]
+                    next_junction_text = next_block[:split_point_next]
+
+                    # 调用LLM平滑连接
+                    stage2_prompt = PROMPT_STAGE_2.format(
+                        prev_junction_text=prev_junction_text,
+                        next_junction_text=next_junction_text
+                    )
+                    smoothed_junction = await process_llm_request(stage2_prompt, cfg["llm_model_name"], 0.3)
+                    
+                    # 用返回结果替换原来的连接部分
+                    text_blocks[i] = prev_block[:split_point_prev]
+                    # 关键: 将下一个块的全部内容替换为 平滑段 + 下一个块的剩余部分
+                    text_blocks[i+1] = smoothed_junction + next_block[split_point_next:]
+                    logging.info(f"LLM Worker (任务 {task_id}): 已处理第 {i+1}/{len(stage1_results) - 1} 个连接点。")
+
+                final_text = "".join(text_blocks)
+
+            # --- 保存最终结果并清理 ---
             output_txt_path = os.path.join(os.path.dirname(task_id), f"{os.path.basename(task_id)}.txt")
-            with open(output_txt_path, 'w', encoding='utf-8') as f: f.write(final_text)
+            with open(output_txt_path, 'w', encoding='utf-8') as f:
+                f.write(final_text)
+            
             await run_in_threadpool(shutil.rmtree, task_id)
             app_state["llm_tasks"][task_id] = "完成"
-            logging.info(f"LLM Worker: 任务 {task_id} 完成。")
+            logging.info(f"LLM Worker: 任务 {task_id} 完成，最终文稿已保存至 {output_txt_path}")
             await asyncio.sleep(1)
             app_state["llm_tasks"].pop(task_id, None)
+
         except Exception as e:
-            logging.error(f"LLM Worker: 处理任务 {task_id} 时出错: {e}")
+            logging.error(f"LLM Worker: 处理任务 {task_id} 时出错: {e}", exc_info=True)
             app_state["llm_tasks"][task_id] = f"失败: {e}"
-        app_state["llm_queue"].task_done()
+        finally:
+            app_state["llm_queue"].task_done()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
