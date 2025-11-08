@@ -8,9 +8,9 @@ path_pairs: # 扫描路径与转移路径的配对
 vad_norm_processes: 4
 
 # 远程 FireRedASR API 配置
-remote_asr_api_url: "http://127.0.0.1:8000/transcribe/FireRedASR"
+remote_asr_api_url: "http://127.0.0.1:8080/v1/audio/transcriptions" # <-- 更新为新的端点
 asr_api_params:
-  asr_type: "aed" # aed 或 llm
+  model: "FireRedASR-AED-L" # <-- 将 asr_type 重命名为 model, 并更新值为 FireRedASR-AED-L 或 FireRedASR-LLM-L
   # asr_device: "cuda:0"
   # llm_device: "cuda:1"
   # llm_dtype: "bf16"
@@ -19,6 +19,7 @@ asr_api_params:
   # beam_size: 3
   # aed_length_penalty: 0.6
   # repetition_penalty: 3.0
+
 
 # OpenAI API (或兼容API) 配置
 openai_api_base: "http://127.0.0.1:8080/v1"
