@@ -184,7 +184,7 @@ async def vad_worker():
             await run_in_threadpool(
                 splitter.split,
                 audio_path=final_path, output_dir=output_dir, target_length=13,
-                max_length=15, overlap_length=1, normalize_audio=True,
+                max_length=15, overlap_length=0.1, normalize_audio=True,
                 norm_processes=cfg["vad_norm_processes"]
             )
             logging.info(f"VAD Worker: 文件 '{final_path}' 切分完成。")
@@ -250,83 +250,103 @@ async def transcription_scan_loop():
                 logging.error(f"扫描器: 扫描循环出错: {e}")
         await asyncio.sleep(5)
 
-async def asr_worker():
-    cfg = app_state["config"]
-    api_url = cfg["remote_asr_api_url"]
-    # 基础参数，不包含动态生成的部分
-    base_api_params = cfg["asr_api_params"]
-
-    # --- 辅助函数：在线程中进行文件读取和Base64编码，防止阻塞事件循环 ---
-    def get_base64_encoded_audio(file_path: str) -> str:
+async def encode_audio_to_base64(file_path: str) -> str:
+    """异步读取音频文件并返回其Base64编码的字符串"""
+    def read_and_encode():
         with open(file_path, "rb") as audio_file:
             return base64.b64encode(audio_file.read()).decode('utf-8')
+    return await asyncio.to_thread(read_and_encode)
 
-    async with httpx.AsyncClient(timeout=None) as client:
+async def asr_worker():
+    """
+    从ASR队列中获取任务，将音频块编码为Base64，
+    通过新的JSON API发送它们，并处理返回的转录结果。
+    """
+    cfg = app_state["config"]
+    api_url = cfg["remote_asr_api_url"]
+    api_params = cfg["asr_api_params"]
+
+    # 使用长超时设置初始化HTTP客户端
+    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
         while True:
             task_id = await app_state["asr_queue"].get()
             logging.info(f"ASR Worker: 开始处理任务 {task_id}")
             app_state["asr_tasks"][task_id] = "进行中"
             
             try:
+                # 1. 读取VAD切分信息
                 vad_info_path = os.path.join(task_id, "_vad_complete.json")
                 with open(vad_info_path, 'r', encoding='utf-8') as f:
                     vad_info = json.load(f)
 
-                # --- 核心改动开始: 构建JSON请求体 ---
-
-                # 1. 异步地将所有音频文件编码为Base64
-                audio_sources = []
-                for chunk in vad_info:
-                    file_path = chunk["file_path"]
-                    encoded_data = await run_in_threadpool(get_base64_encoded_audio, file_path)
-                    audio_sources.append({
-                        "file_name": os.path.basename(file_path),
-                        "audio_data": encoded_data
-                    })
+                # --- NEW: 适配新的JSON API ---
+                # 2. 异步地将所有音频文件编码为Base64
+                logging.info(f"ASR Worker (任务 {task_id}): 正在编码 {len(vad_info)} 个音频文件...")
                 
-                # 2. 构造最终的JSON Payload
-                payload = base_api_params.copy()
-                payload["audio_files"] = audio_sources
-                payload["stream"] = False # 添加API要求的固定参数
+                encoding_tasks = [
+                    encode_audio_to_base64(chunk["file_path"]) for chunk in vad_info
+                ]
+                base64_audio_data = await asyncio.gather(*encoding_tasks)
 
-                # 3. 发送JSON请求
-                logging.info(f"ASR Worker: 正在向 {api_url} 发送包含 {len(audio_sources)} 个文件的JSON请求...")
-                response = await client.post(api_url, json=payload)
+                # 3. 构建 audio_files 列表
+                audio_files_payload = [
+                    {
+                        "file_name": os.path.basename(chunk["file_path"]),
+                        "audio_data": b64_data
+                    }
+                    for chunk, b64_data in zip(vad_info, base64_audio_data)
+                ]
+
+                # 4. 构建最终的JSON请求体
+                json_payload = {
+                    **api_params,  # 从config加载的基础参数 (如 model, beam_size 等)
+                    "audio_files": audio_files_payload,
+                    "stream": False # 固定为False
+                }
                 
-                # --- 核心改动结束 ---
+                logging.info(f"ASR Worker (任务 {task_id}): 准备发送请求到 {api_url}...")
+                
+                # 5. 发送JSON请求
+                response = await client.post(api_url, json=json_payload)
 
+                # --- 响应处理 (与原版逻辑兼容) ---
                 if response.status_code == 200:
                     results = response.json()
-                    # 响应处理逻辑保持不变
-                    results_dict = {r['uttid']: r['text'] for r in results}
-                    sorted_transcripts = [
-                        {
-                            "file": c["file_path"],
-                            "text": results_dict.get(os.path.splitext(os.path.basename(c["file_path"]))[0], "[识别失败]")
-                        } for c in vad_info
-                    ]
                     
+                    # 假设返回的uttid是文件名或其前缀，这与原版逻辑兼容
+                    results_dict = {r['uttid']: r['text'] for r in results}
+                    
+                    sorted_transcripts = []
+                    for c in vad_info:
+                        file_basename = os.path.splitext(os.path.basename(c["file_path"]))[0]
+                        text = results_dict.get(file_basename, "[识别失败]")
+                        sorted_transcripts.append({"file": c["file_path"], "text": text})
+
+                    # 写入结果文件
                     with open(os.path.join(task_id, "_asr_complete.json"), 'w', encoding='utf-8') as f:
                         json.dump(sorted_transcripts, f, indent=4, ensure_ascii=False)
-                        
+                    
                     app_state["asr_tasks"][task_id] = "完成"
                     logging.info(f"ASR Worker: 任务 {task_id} 成功完成。")
                     
+                    # 触发LLM任务 (如果配置允许)
                     if cfg.get("allow_concurrent_asr_llm", False) and task_id not in app_state["llm_tasks"]:
                        app_state["llm_tasks"][task_id] = "排队中"
                        await app_state["llm_queue"].put(task_id)
-                       
+                    
                     await asyncio.sleep(1) 
                     app_state["asr_tasks"].pop(task_id, None)
+
                 else:
                     logging.error(f"ASR Worker: API请求失败 ({response.status_code}): {response.text}")
                     app_state["asr_tasks"][task_id] = f"失败: API错误 {response.status_code}"
 
             except Exception as e:
                 logging.error(f"ASR Worker: 处理任务 {task_id} 时出错: {e}", exc_info=True)
-                app_state["asr_tasks"][task_id] = f"失败: {e}"
+                app_state["asr_tasks"][task_id] = f"失败: {str(e)}"
             
-            app_state["asr_queue"].task_done()
+            finally:
+                app_state["asr_queue"].task_done()
 
 async def llm_worker():
     cfg = app_state["config"]

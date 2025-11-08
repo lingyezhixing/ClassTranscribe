@@ -3,8 +3,8 @@
 # 扫描与VAD配置
 scan_interval_minutes: 0.1
 path_pairs: # 扫描路径与转移路径的配对
-  - scan_path: "/data/recordings"
-    transfer_path: "/data/processed"
+  - scan_path: "E:\\Programming\\pycodes\\Projects\\Dev_Projects\\ClassTranscribe\\data\\recordings"
+    transfer_path: "E:\\Programming\\pycodes\\Projects\\Dev_Projects\\ClassTranscribe\\data\\processed"
 vad_norm_processes: 4
 
 # 远程 FireRedASR API 配置
