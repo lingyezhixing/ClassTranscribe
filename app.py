@@ -138,46 +138,69 @@ async def vad_worker():
             transfer_path = cfg["path_pairs"][0]["transfer_path"]
             
             base_name, ext = os.path.splitext(filename)
-            date_pattern = re.compile(r"^\d{4}年\d{2}月\d{2}日$")
-            base_name_A = base_name if date_pattern.match(base_name) else datetime.date.today().strftime("%Y年%m月%d日")
 
-            all_files_in_transfer = await run_in_threadpool(
-                lambda: [f for f in os.listdir(transfer_path) if os.path.isfile(os.path.join(transfer_path, f))]
-            )
-            related_audio_files = sorted([f for f in all_files_in_transfer if os.path.splitext(f)[0].split('-')[0] == base_name_A])
-            num_existing = len(related_audio_files)
-
-            if num_existing == 0:
-                new_filename = f"{base_name_A}{ext}"
+            # --- MODIFICATION START: 增加对 '日期-序号' 格式的信任判断 ---
             
-            elif num_existing == 1:
-                existing_filename = related_audio_files[0]
-                existing_base_name, existing_ext = os.path.splitext(existing_filename)
+            # 1. 定义两种正则表达式
+            # 用于匹配 "YYYY年MM月DD日-X" 格式，我们信任这种格式
+            trusted_pattern = re.compile(r"^\d{4}年\d{2}月\d{2}日-\d+$") 
+            # 用于匹配 "YYYY年MM月DD日" 格式，这种格式需要自动编号
+            date_pattern = re.compile(r"^\d{4}年\d{2}月\d{2}日$")
 
-                if '-' not in existing_base_name:
-                    # 重命名音频文件
-                    old_file_path = os.path.join(transfer_path, existing_filename)
-                    new_indexed_filename = f"{base_name_A}-1{existing_ext}"
-                    new_file_path = os.path.join(transfer_path, new_indexed_filename)
-                    await run_in_threadpool(os.rename, old_file_path, new_file_path)
-                    logging.info(f"VAD Worker: 为第一份文件添加序号: {existing_filename} -> {new_indexed_filename}")
-
-                    # 同步重命名对应的文件夹
-                    old_dir_path = os.path.join(transfer_path, existing_base_name)
-                    new_indexed_dir_name = f"{base_name_A}-1"
-                    new_dir_path = os.path.join(transfer_path, new_indexed_dir_name)
-
-                    if await run_in_threadpool(os.path.isdir, old_dir_path):
-                        await run_in_threadpool(os.rename, old_dir_path, new_dir_path)
-                        logging.info(f"VAD Worker: 同步重命名文件夹: {existing_base_name} -> {new_indexed_dir_name}")
-                
-                new_filename = f"{base_name_A}-2{ext}"
-
+            # 2. 优先检查文件名是否为我们信任的格式
+            if trusted_pattern.match(base_name):
+                # 如果文件名符合 "日期-序号" 格式，直接采用，不进行任何修改
+                logging.info(f"VAD Worker: 原始文件名 '{filename}' 符合 '日期-序号' 格式，将直接使用。")
+                new_filename = filename
+            
             else:
-                new_filename = f"{base_name_A}-{num_existing + 1}{ext}"
+                # 如果不符合信任格式，则执行原有的自动命名和编号逻辑
+                logging.info(f"VAD Worker: 原始文件名 '{filename}' 不符合 '日期-序号' 格式，将执行自动命名逻辑。")
+                
+                # 如果文件名是纯日期，则使用它；否则，使用今天的日期作为基础
+                base_name_A = base_name if date_pattern.match(base_name) else datetime.date.today().strftime("%Y年%m月%d日")
+
+                all_files_in_transfer = await run_in_threadpool(
+                    lambda: [f for f in os.listdir(transfer_path) if os.path.isfile(os.path.join(transfer_path, f))]
+                )
+                related_audio_files = sorted([f for f in all_files_in_transfer if os.path.splitext(f)[0].split('-')[0] == base_name_A])
+                num_existing = len(related_audio_files)
+
+                if num_existing == 0:
+                    new_filename = f"{base_name_A}{ext}"
+                
+                elif num_existing == 1:
+                    existing_filename = related_audio_files[0]
+                    existing_base_name, existing_ext = os.path.splitext(existing_filename)
+
+                    if '-' not in existing_base_name:
+                        # 重命名音频文件
+                        old_file_path = os.path.join(transfer_path, existing_filename)
+                        new_indexed_filename = f"{base_name_A}-1{existing_ext}"
+                        new_file_path = os.path.join(transfer_path, new_indexed_filename)
+                        await run_in_threadpool(os.rename, old_file_path, new_file_path)
+                        logging.info(f"VAD Worker: 为第一份文件添加序号: {existing_filename} -> {new_indexed_filename}")
+
+                        # 同步重命名对应的文件夹
+                        old_dir_path = os.path.join(transfer_path, existing_base_name)
+                        new_indexed_dir_name = f"{base_name_A}-1"
+                        new_dir_path = os.path.join(transfer_path, new_indexed_dir_name)
+
+                        if await run_in_threadpool(os.path.isdir, old_dir_path):
+                            await run_in_threadpool(os.rename, old_dir_path, new_dir_path)
+                            logging.info(f"VAD Worker: 同步重命名文件夹: {existing_base_name} -> {new_indexed_dir_name}")
+                    
+                    new_filename = f"{base_name_A}-2{ext}"
+
+                else:
+                    new_filename = f"{base_name_A}-{num_existing + 1}{ext}"
+
+            # --- MODIFICATION END ---
 
             final_path = os.path.join(transfer_path, new_filename)
-            await run_in_threadpool(shutil.move, original_filepath, final_path)
+            # 在移动前检查目标路径是否与源路径相同，避免不必要的移动操作
+            if final_path != original_filepath:
+                await run_in_threadpool(shutil.move, original_filepath, final_path)
             
             output_dir = os.path.join(transfer_path, os.path.splitext(new_filename)[0])
             logging.info(f"VAD Worker: 开始切分 '{final_path}'")
