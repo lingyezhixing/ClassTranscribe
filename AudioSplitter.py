@@ -32,10 +32,11 @@ class AudioSplitter:
             print("检测到首次使用VAD，正在加载 Silero VAD 模型（此操作仅执行一次）...")
             torch.set_num_threads(1)
             # Silero VAD is loaded from torch.hub
-            self._vad_model, _ = torch.hub.load(repo_or_dir='snakers4/silero-vad',
+            self._vad_model, _ = torch.hub.load(repo_or_dir='snakers4_silero-vad_master',
                                                 model='silero_vad',
                                                 force_reload=False,
-                                                onnx=self.use_onnx)
+                                                onnx=self.use_onnx,
+                                                source='local')
             print("VAD 模型加载完成。")
         return self._vad_model
 
