@@ -139,25 +139,18 @@ async def vad_worker():
             
             base_name, ext = os.path.splitext(filename)
 
-            # --- MODIFICATION START: 增加对 '日期-序号' 格式的信任判断 ---
-            
-            # 1. 定义两种正则表达式
-            # 用于匹配 "YYYY年MM月DD日-X" 格式，我们信任这种格式
+            # 1. 定义正则表达式
             trusted_pattern = re.compile(r"^\d{4}年\d{2}月\d{2}日-\d+$") 
-            # 用于匹配 "YYYY年MM月DD日" 格式，这种格式需要自动编号
             date_pattern = re.compile(r"^\d{4}年\d{2}月\d{2}日$")
 
             # 2. 优先检查文件名是否为我们信任的格式
             if trusted_pattern.match(base_name):
-                # 如果文件名符合 "日期-序号" 格式，直接采用，不进行任何修改
                 logging.info(f"VAD Worker: 原始文件名 '{filename}' 符合 '日期-序号' 格式，将直接使用。")
                 new_filename = filename
             
             else:
-                # 如果不符合信任格式，则执行原有的自动命名和编号逻辑
                 logging.info(f"VAD Worker: 原始文件名 '{filename}' 不符合 '日期-序号' 格式，将执行自动命名逻辑。")
                 
-                # 如果文件名是纯日期，则使用它；否则，使用今天的日期作为基础
                 base_name_A = base_name if date_pattern.match(base_name) else datetime.date.today().strftime("%Y年%m月%d日")
 
                 all_files_in_transfer = await run_in_threadpool(
@@ -166,39 +159,22 @@ async def vad_worker():
                 related_audio_files = sorted([f for f in all_files_in_transfer if os.path.splitext(f)[0].split('-')[0] == base_name_A])
                 num_existing = len(related_audio_files)
 
+                # --- MODIFICATION START: 简化并调整自动编号逻辑 ---
+                
+                # 如果这是当天的第一份文件
                 if num_existing == 0:
                     new_filename = f"{base_name_A}{ext}"
+                    logging.info(f"VAD Worker: 这是当天的第一份文件，命名为: {new_filename}")
                 
-                elif num_existing == 1:
-                    existing_filename = related_audio_files[0]
-                    existing_base_name, existing_ext = os.path.splitext(existing_filename)
-
-                    if '-' not in existing_base_name:
-                        # 重命名音频文件
-                        old_file_path = os.path.join(transfer_path, existing_filename)
-                        new_indexed_filename = f"{base_name_A}-1{existing_ext}"
-                        new_file_path = os.path.join(transfer_path, new_indexed_filename)
-                        await run_in_threadpool(os.rename, old_file_path, new_file_path)
-                        logging.info(f"VAD Worker: 为第一份文件添加序号: {existing_filename} -> {new_indexed_filename}")
-
-                        # 同步重命名对应的文件夹
-                        old_dir_path = os.path.join(transfer_path, existing_base_name)
-                        new_indexed_dir_name = f"{base_name_A}-1"
-                        new_dir_path = os.path.join(transfer_path, new_indexed_dir_name)
-
-                        if await run_in_threadpool(os.path.isdir, old_dir_path):
-                            await run_in_threadpool(os.rename, old_dir_path, new_dir_path)
-                            logging.info(f"VAD Worker: 同步重命名文件夹: {existing_base_name} -> {new_indexed_dir_name}")
-                    
-                    new_filename = f"{base_name_A}-2{ext}"
-
+                # 如果当天已存在文件，新文件从序号-2开始
                 else:
-                    new_filename = f"{base_name_A}-{num_existing + 1}{ext}"
+                    new_index = num_existing + 1
+                    new_filename = f"{base_name_A}-{new_index}{ext}"
+                    logging.info(f"VAD Worker: 当天已存在 {num_existing} 份文件，新文件命名为: {new_filename}")
 
-            # --- MODIFICATION END ---
+                # --- MODIFICATION END ---
 
             final_path = os.path.join(transfer_path, new_filename)
-            # 在移动前检查目标路径是否与源路径相同，避免不必要的移动操作
             if final_path != original_filepath:
                 await run_in_threadpool(shutil.move, original_filepath, final_path)
             
@@ -290,7 +266,7 @@ async def asr_worker():
     api_params = cfg["asr_api_params"]
 
     # 使用长超时设置初始化HTTP客户端
-    async with httpx.AsyncClient(timeout=httpx.Timeout(300.0)) as client:
+    async with httpx.AsyncClient(timeout=httpx.Timeout(None)) as client:
         while True:
             task_id = await app_state["asr_queue"].get()
             logging.info(f"ASR Worker: 开始处理任务 {task_id}")

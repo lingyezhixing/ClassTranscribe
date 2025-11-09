@@ -163,9 +163,6 @@ class AudioSplitter:
             chunk_audio.export(output_filepath, format="wav")
             info_data.append({"file_path": output_filepath, "original_start_time": chunk_info['start'], "original_end_time": chunk_info['end'], "duration": chunk_info['end'] - chunk_info['start']})
             filepaths_to_normalize.append(output_filepath)
-
-        info_filepath = os.path.join(output_dir, "_vad_complete.json")
-        with open(info_filepath, 'w', encoding='utf-8') as f: json.dump(info_data, f, indent=4, ensure_ascii=False)
         
         if normalize_audio:
             print(f"\n正在对 {len(filepaths_to_normalize)} 个音频分段进行标准化 (使用 {norm_processes} 个进程)...")
@@ -178,6 +175,9 @@ class AudioSplitter:
                 for res in failures: print(f"- {res[0]}: {res[2]}")
             else:
                 print("所有音频分段已成功标准化。")
+        
+        info_filepath = os.path.join(output_dir, "_vad_complete.json")
+        with open(info_filepath, 'w', encoding='utf-8') as f: json.dump(info_data, f, indent=4, ensure_ascii=False)
 
         print("\n--- 分割统计 ---")
         print(f"总计: 成功分割为 {len(chunks)} 个音频文件。")
